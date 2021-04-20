@@ -61,6 +61,10 @@ import review from './review'
 import gallery from './gallery'
 import presence, {objectWithNestedArray} from './presence'
 import {customBlock, hoistedPt, hoistedPtDocument} from './hoistedPt'
+import {
+  fieldValidationInferReproSharedObject,
+  fieldValidationInferReproDoc,
+} from './fieldValidationInferRepro'
 
 export default createSchema({
   name: 'test-examples',
@@ -114,6 +118,8 @@ export default createSchema({
     myObject,
     codeInputType,
     notitle,
+    fieldValidationInferReproSharedObject,
+    fieldValidationInferReproDoc,
     typeWithNoToplevelStrings,
     reservedFieldNames,
     previewImageUrlTest,
