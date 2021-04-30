@@ -55,7 +55,7 @@ export interface Props {
 }
 
 export class ObjectInput extends React.PureComponent<Props> {
-  _firstField: any
+  _focusRef: any
   static defaultProps = {
     onChange() {
       // not implemented
@@ -130,7 +130,7 @@ export class ObjectInput extends React.PureComponent<Props> {
         presence={presence}
         readOnly={readOnly}
         filterField={filterField}
-        ref={index === 0 && this.setFirstField}
+        ref={index === 0 ? this.setFocusRef : null}
       />
     )
   }
@@ -213,28 +213,30 @@ export class ObjectInput extends React.PureComponent<Props> {
     )
   }
 
-  setFirstField = (el) => {
-    this._firstField = el
+  setFocusRef = (el) => {
+    this._focusRef = el
   }
 
   focus() {
-    if (this._firstField) {
-      this._firstField.focus()
+    if (this._focusRef) {
+      this._focusRef.focus()
     }
+  }
+
+  renderContent = () => {
+    return (
+      <>
+        {this.getRenderedFields()}
+        {this.renderUnknownFields()}
+      </>
+    )
   }
 
   render() {
     const {type, level, focusPath, onFocus, presence, markers} = this.props
-    const renderedFields = this.getRenderedFields()
-    const renderedUnknownFields = this.renderUnknownFields()
 
     if (level === 0) {
-      return (
-        <Grid gap={[2, 5]}>
-          {renderedFields}
-          {renderedUnknownFields}
-        </Grid>
-      )
+      return <Grid gap={[2, 5]}>{this.renderContent()}</Grid>
     }
 
     const collapsibleOpts = getCollapsedWithDefaults(type.options, level)
@@ -252,10 +254,10 @@ export class ObjectInput extends React.PureComponent<Props> {
         __unstable_markers={markers}
         __unstable_presence={isCollapsed ? presence : EMPTY_ARRAY}
         onFocus={onFocus}
+        ref={isCollapsed ? this.setFocusRef : null}
         __unstable_changeIndicator={false}
       >
-        {renderedFields}
-        {renderedUnknownFields}
+        {this.renderContent}
       </FormFieldSet>
     )
   }
