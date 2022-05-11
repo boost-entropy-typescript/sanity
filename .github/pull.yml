@@ -1,6 +1,6 @@
 version: "1"
 rules:
   - base: next
-    upstream: null:next
+    upstream: sanity-io:next
     mergeMethod: merge
     mergeUnstable: true
