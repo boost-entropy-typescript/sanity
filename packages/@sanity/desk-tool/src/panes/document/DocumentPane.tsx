@@ -186,6 +186,7 @@ function InnerDocumentPane() {
     inspectOpen,
     paneKey,
     value,
+    documentIsReferenced,
   } = useDocumentPane()
   const {features} = useDeskTool()
   const {collapsed: layoutCollapsed} = usePaneLayout()
@@ -209,11 +210,11 @@ function InnerDocumentPane() {
 
   const footer = useMemo(
     () => (
-      <PaneFooter ref={setFooterElement}>
+      <PaneFooter isReferencedDocument={documentIsReferenced} ref={setFooterElement}>
         <DocumentStatusBar actionsBoxRef={setActionsBoxElement} />
       </PaneFooter>
     ),
-    []
+    [documentIsReferenced]
   )
 
   const changesPanel = useMemo(() => {

@@ -5,6 +5,7 @@ import {
   Flex,
   Grid,
   Popover,
+  ThemeColorProvider,
   useClickOutside,
   useGlobalKeyDown,
   useLayer,
@@ -23,6 +24,7 @@ export function ConfirmDialog(props: {
       content={<ConfirmDialogContent dialog={dialog} />}
       fallbackPlacements={POPOVER_FALLBACK_PLACEMENTS}
       open
+      tone="default"
       placement="top"
       portal
       preventOverflow
