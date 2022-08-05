@@ -6,8 +6,9 @@ import {
   createHookFromObservableFactory,
   getPublishedId,
   fetchAllCrossProjectTokens,
+  getDraftId,
 } from '@sanity/base/_internal'
-import {Observable, timer, fromEvent, EMPTY, of} from 'rxjs'
+import {Observable, timer, fromEvent, EMPTY, of, combineLatest} from 'rxjs'
 import {
   map,
   startWith,
@@ -30,22 +31,23 @@ const versionedClient = client.withConfig({
   apiVersion: '2022-03-07',
 })
 
-const POLL_INTERVAL = 5000
+const DEFAULT_POLL_INTERVAL = 5000
 
 // only fetches when the document is visible
-const visiblePoll$ = fromEvent(document, 'visibilitychange').pipe(
-  // add empty emission to have this fire on creation
-  startWith(null),
-  map(() => document.visibilityState === 'visible'),
-  distinctUntilChanged(),
-  switchMap((visible) =>
-    visible
-      ? // using timer instead of interval since timer will emit on creation
-        timer(0, POLL_INTERVAL)
-      : EMPTY
-  ),
-  shareReplay({refCount: true, bufferSize: 1})
-)
+const createVisiblePoll = (interval?: number) =>
+  fromEvent(document, 'visibilitychange').pipe(
+    // add empty emission to have this fire on creation
+    startWith(null),
+    map(() => document.visibilityState === 'visible'),
+    distinctUntilChanged(),
+    switchMap((visible) =>
+      visible
+        ? // using timer instead of interval since timer will emit on creation
+          timer(0, interval || DEFAULT_POLL_INTERVAL)
+        : EMPTY
+    ),
+    shareReplay({refCount: true, bufferSize: 1})
+  )
 
 export type ReferringDocuments = {
   isLoading: boolean
@@ -81,16 +83,55 @@ export type ReferringDocuments = {
   }
 }
 
+interface AvailabilityResponse {
+  omitted: {id: string; reason: 'existence' | 'permission'}[]
+}
+
+function getDocumentExistence(documentId: string): Observable<string | undefined> {
+  const draftId = getDraftId(documentId)
+  const publishedId = getPublishedId(documentId)
+  const requestOptions = {
+    uri: versionedClient.getDataUrl('doc', `${draftId},${publishedId}`),
+    json: true,
+    query: {excludeContent: 'true'},
+    tag: 'use-referring-documents.document-existence',
+  }
+  return versionedClient.observable.request<AvailabilityResponse>(requestOptions).pipe(
+    map(({omitted}) => {
+      const nonExistant = omitted.filter((doc) => doc.reason === 'existence')
+      if (nonExistant.length === 2) {
+        // None of the documents exist
+        return undefined
+      }
+
+      if (nonExistant.length === 0) {
+        // Both exist, so use the published one
+        return publishedId
+      }
+
+      // If the draft does not exist, use the published ID, and vice versa
+      return nonExistant.some((doc) => doc.id === draftId) ? publishedId : draftId
+    })
+  )
+}
+
 /**
  * fetches the cross-dataset references using the client observable.request
  * method (for that requests can be automatically cancelled)
  */
 function fetchCrossDatasetReferences(
-  documentId: string
+  documentId: string,
+  visiblePoll$: ReturnType<typeof createVisiblePoll>
 ): Observable<ReferringDocuments['crossDatasetReferences']> {
   return visiblePoll$.pipe(
-    switchMap(() => fetchAllCrossProjectTokens()),
-    switchMap((crossProjectTokens) => {
+    switchMap(() =>
+      combineLatest([getDocumentExistence(documentId), fetchAllCrossProjectTokens()])
+    ),
+    switchMap(([checkDocumentId, crossProjectTokens]) => {
+      if (!checkDocumentId) {
+        return of({totalCount: 0, references: []})
+      }
+
       const currentDataset = client.config().dataset
       const headers: Record<string, string> =
         crossProjectTokens.length > 0
@@ -103,8 +144,9 @@ function fetchCrossDatasetReferences(
 
       return versionedClient.observable
         .request({
-          url: `/data/references/${currentDataset}/documents/${documentId}/to?excludeInternalReferences=true&excludePaths=true`,
+          url: `/data/references/${currentDataset}/documents/${checkDocumentId}/to?excludeInternalReferences=true&excludePaths=true`,
           headers,
+          tag: 'use-referring-documents.external',
         })
         .pipe(
           catchError((e) => {
@@ -125,23 +167,36 @@ function fetchCrossDatasetReferences(
 const useInternalReferences = createHookFromObservableFactory((documentId: string) => {
   const referencesClause = '*[references($documentId)][0...100]{_id,_type}'
   const totalClause = 'count(*[references($documentId)])'
+  const fetchQuery = `{"references":${referencesClause},"totalCount":${totalClause}}`
+  const listenQuery = '*[references($documentId)]'
 
   return documentStore.listenQuery(
-    `{"references":${referencesClause},"totalCount":${totalClause}}`,
+    {fetch: fetchQuery, listen: listenQuery},
     {documentId},
-    {tag: 'use-referring-documents'}
+    {tag: 'use-referring-documents', transitions: ['appear', 'disappear'], throttleTime: 5000}
   ) as Observable<ReferringDocuments['internalReferences']>
 })
 
-const useCrossDatasetReferences = createHookFromObservableFactory((documentId: string) => {
-  return visiblePoll$.pipe(switchMap(() => fetchCrossDatasetReferences(documentId)))
-})
+const useCrossDatasetReferences = createHookFromObservableFactory(
+  (documentId: string, interval?: number) => {
+    const visiblePoll$ = createVisiblePoll(interval)
+    return visiblePoll$.pipe(switchMap(() => fetchCrossDatasetReferences(documentId, visiblePoll$)))
+  }
+)
 
-export function useReferringDocuments(documentId: string): ReferringDocuments {
+export interface UseReferringDocumentsOptions {
+  externalPollInterval?: number
+}
+
+export function useReferringDocuments(
+  documentId: string,
+  options: UseReferringDocumentsOptions = {}
+): ReferringDocuments {
   const publishedId = getPublishedId(documentId)
   const [internalReferences, isInternalReferencesLoading] = useInternalReferences(publishedId)
   const [crossDatasetReferences, isCrossDatasetReferencesLoading] = useCrossDatasetReferences(
-    publishedId
+    publishedId,
+    options.externalPollInterval
   )
 
   const projectIds = useMemo(() => {
